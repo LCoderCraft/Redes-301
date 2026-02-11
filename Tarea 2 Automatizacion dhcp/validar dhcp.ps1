@@ -1,23 +1,31 @@
-Write-Host "--- Iniciando Proceso de Renovación DHCP ---" -ForegroundColor Yellow
+Write-Host "--- Iniciando Proceso de Renovacion DHCP ---" -ForegroundColor Yellow
 
-# Paso 1: Forzar la liberación y renovación de la IP
-Write-Host "[*] Liberando dirección actual..."
+Write-Host "[*] Liberando direccion actual..."
 ipconfig /release "Ethernet 2" | Out-Null
 Start-Sleep -Seconds 1
 
-Write-Host "[*] Solicitando nueva dirección al servidor..."
+Write-Host "[*] Solicitando nueva direccion al servidor..."
 ipconfig /renew "Ethernet 2" | Out-Null
 
-Write-Host "`n--- Validando Integridad de Parámetros DHCP ---" -ForegroundColor Cyan
+Write-Host "`n--- Validando Integridad de Parametros DHCP ---" -ForegroundColor Cyan
 
-# Paso 2: Obtener y validar la nueva configuración
 $adapter = Get-NetIPConfiguration -InterfaceAlias "Ethernet 2"
 $ip = $adapter.IPv4Address.IPAddress
 
-if ($ip -like "192.168.100.*") {
-    Write-Host "[PASÓ] IP recibida correctamente: $ip" -ForegroundColor Green
-    Write-Host "[PASÓ] Servidor DNS: $($adapter.DNSServer.ServerAddresses)" -ForegroundColor Green
-    Write-Host "[PASÓ] Puerta de Enlace: $($adapter.IPv4DefaultGateway.NextHop)" -ForegroundColor Green
+$mac = (Get-NetAdapter -Name "Ethernet 2").MacAddress.Replace("-", ":")
+$dhcpServer = (Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "MACAddress='$mac'").DHCPServer
+
+if ([string]::IsNullOrWhiteSpace($ip) -or $ip -like "169.254.*") {
+    Write-Host "[FALLO] El servidor no respondio. Se asigno IP APIPA o ninguna: $ip" -ForegroundColor Red
 } else {
-    Write-Host "[FALLÓ] La IP $ip no pertenece al segmento esperado." -ForegroundColor Red
+    Write-Host "[PASO] IP recibida correctamente: $ip" -ForegroundColor Green
+    
+    if ($dhcpServer) {
+        Write-Host "[PASO] Entregada por Servidor DHCP: $dhcpServer" -ForegroundColor Cyan
+    } else {
+        Write-Host "[!] IP asignada, pero Windows no registro al Servidor DHCP." -ForegroundColor Yellow
+    }
+    
+    Write-Host "[PASO] Servidor DNS: $($adapter.DNSServer.ServerAddresses)" -ForegroundColor Green
+    Write-Host "[PASO] Puerta de Enlace: $($adapter.IPv4DefaultGateway.NextHop)" -ForegroundColor Green
 }
