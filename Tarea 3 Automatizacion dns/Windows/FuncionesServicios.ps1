@@ -1,8 +1,4 @@
-#Requires -RunAsAdministrator
-
-# ==========================================================
-#   SISTEMA DE ADMINISTRACION DHCP Y DNS
-# ==========================================================
+# FuncionesServicios.ps1
 
 New-NetFirewallRule -DisplayName "Lab-DNS-UDP" -Direction Inbound -LocalPort 53 -Protocol UDP -Action Allow -ErrorAction SilentlyContinue | Out-Null
 New-NetFirewallRule -DisplayName "Lab-DNS-TCP" -Direction Inbound -LocalPort 53 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue | Out-Null
@@ -56,7 +52,7 @@ function Get-CidrLength ([string]$Mask) {
     return $global:MaskCidrTable[$Mask]
 }
 
-# --- FUNCIONES DEL MENU ---
+# --- FUNCIONES DE LOGICA DHCP ---
 
 function Mostrar-Verificacion {
     Clear-Host
@@ -214,7 +210,6 @@ function Configurar-Ambito {
     Read-Host "Presione ENTER para continuar"
 }
 
-
 function Gestionar-Ambito {
     Clear-Host
     Write-Host "=== ELIMINAR O MODIFICAR AMBITO EXISTENTE ===" -ForegroundColor Cyan
@@ -260,211 +255,6 @@ function Gestionar-Ambito {
     Read-Host "Presione ENTER para continuar"
 }
 
-function Instalar-DNS {
-    Clear-Host
-    Write-Host "=== INSTALACION DE ROL DNS ===" -ForegroundColor Cyan
-
-    $dnsFeature = Get-WindowsFeature -Name DNS
-    if ($dnsFeature.Installed) {
-        Write-Host "El rol DNS ya esta instalado." -ForegroundColor Yellow
-        $resp = Read-Host "Desea REINSTALAR el rol DNS? (s/n)"
-        if ($resp -match "^[sS]$") {
-            Uninstall-WindowsFeature -Name DNS -IncludeManagementTools | Out-Null
-            Install-WindowsFeature -Name DNS -IncludeManagementTools | Out-Null
-            Write-Host "DNS reinstalado correctamente." -ForegroundColor Green
-        }
-    } else {
-        Install-WindowsFeature -Name DNS -IncludeManagementTools | Out-Null
-        Write-Host "DNS instalado correctamente." -ForegroundColor Green
-    }
-
-    Read-Host "Presione ENTER para continuar"
-}
-
-function Obtener-Rango-DHCP {
-
-    $ambito = Get-DhcpServerv4Scope | Select-Object -First 1
-    if (-not $ambito) { return $null }
-
-    return @{
-        Start = $ambito.StartRange
-        End   = $ambito.EndRange
-        Scope = $ambito.ScopeId
-    }
-}
-
-function Obtener-IP-Libre-DNS {
-
-    $rango = Obtener-Rango-DHCP
-    if (-not $rango) { return $null }
-
-    $start = Convert-IPToUInt32 $rango.Start
-    $end   = Convert-IPToUInt32 $rango.End
-
-    $zonas = Get-DnsServerZone -ErrorAction SilentlyContinue |
-             Where-Object {$_.ZoneType -eq "Primary"}
-
-    $ipsUsadas = @()
-
-    foreach ($zona in $zonas) {
-        $record = Get-DnsServerResourceRecord -ZoneName $zona.ZoneName -RRType A -ErrorAction SilentlyContinue |
-                  Where-Object {$_.HostName -eq "@"}
-        if ($record) {
-            $ipsUsadas += Convert-IPToUInt32 $record.RecordData.IPv4Address.IPAddressToString
-        }
-    }
-
-    for ($i = $start; $i -le $end; $i++) {
-        if ($ipsUsadas -notcontains $i) {
-            return Convert-UInt32ToIP $i
-        }
-    }
-
-    return $null
-}
-
-function Alta-Dominio {
-    Clear-Host
-    Write-Host "=== CREACION DE DOMINIO DNS ===" -ForegroundColor Cyan
-
-    # 1. Pedir el nombre del dominio
-    $Dominio = Read-Host "Introduce el nombre del dominio (ej. reprobados.com)"
-    
-    if ([string]::IsNullOrWhiteSpace($Dominio)) {
-        Write-Host "[!] El nombre de dominio no puede estar vacio." -ForegroundColor Red
-        Read-Host "Presione ENTER para continuar"
-        return
-    }
-
-    # 2. Pedir la IP destino y validarla
-    $ServerIP = Read-Host "Introduce la IP a la que apuntara (ej. 192.168.100.21)"
-    
-    if (-not (Test-ValidIP $ServerIP)) {
-        Write-Host "[!] La IP ingresada no es valida o tiene un formato incorrecto." -ForegroundColor Red
-        Read-Host "Presione ENTER para continuar"
-        return
-    }
-
-    try {
-        # Si la zona ya existe, la borramos para recrearla limpia
-        if (Get-DnsServerZone -Name $Dominio -ErrorAction SilentlyContinue) {
-            Remove-DnsServerZone -Name $Dominio -Force
-        }
-
-        Write-Host "[*] Creando archivo de zona y registros..." -ForegroundColor Yellow
-
-        # Crear Zona Primaria
-        Add-DnsServerPrimaryZone -Name $Dominio -ZoneFile "$Dominio.dns"
-        
-        # Crear Registro @ (Raíz)
-        Add-DnsServerResourceRecordA -ZoneName $Dominio -Name "@" -IPv4Address $ServerIP
-        
-        # Crear Registro www (CNAME)
-        Add-DnsServerResourceRecordCName -ZoneName $Dominio -Name "www" -HostNameAlias "$Dominio."
-
-        Write-Host "[OK] Zona '$Dominio' creada con exito." -ForegroundColor Green
-        Write-Host "[OK] Registros A y CNAME apuntando a $ServerIP." -ForegroundColor Green
-        
-        # Reiniciar caché DNS local para que tome los cambios de inmediato
-        Clear-DnsServerCache -Force
-    } catch {
-        Write-Host "[ERROR] Al configurar DNS: $($_.Exception.Message)" -ForegroundColor Red
-    }
-
-    Write-Host ""
-    Read-Host "Presione ENTER para continuar"
-}
-function Baja-Dominio {
-
-    Clear-Host
-    Write-Host "=== ELIMINAR DOMINIO DNS ===" -ForegroundColor Cyan
-
-    $zonas = Get-DnsServerZone -ErrorAction SilentlyContinue |
-             Where-Object {
-                 $_.ZoneType -eq "Primary" -and
-                 $_.ZoneName -notmatch "in-addr.arpa" -and
-                 $_.ZoneName -ne "TrustAnchors"
-             }
-
-    if (-not $zonas) {
-        Write-Host "No existen dominios creados manualmente." -ForegroundColor Yellow
-        Read-Host "ENTER para continuar"
-        return
-    }
-
-    foreach ($zona in $zonas) {
-
-        $record = Get-DnsServerResourceRecord -ZoneName $zona.ZoneName -RRType A -ErrorAction SilentlyContinue |
-                  Where-Object {$_.HostName -eq "@"}
-
-        $ip = if ($record) {
-            $record.RecordData.IPv4Address.IPAddressToString
-        } else {
-            "Sin IP"
-        }
-
-        Write-Host "$($zona.ZoneName)  ->  IP: $ip"
-    }
-
-    $nombreDominio = Read-Host "Escriba el NOMBRE del dominio a eliminar"
-
-    $zonaEncontrada = $zonas | Where-Object { $_.ZoneName -eq $nombreDominio }
-
-    if (-not $zonaEncontrada) {
-        Write-Host "El dominio no existe o no es valido." -ForegroundColor Red
-        Read-Host "ENTER para continuar"
-        return
-    }
-
-    $confirmar = Read-Host "Seguro que desea eliminar $nombreDominio ? (s/n)"
-
-    if ($confirmar -match "^[sS]$") {
-        Remove-DnsServerZone -Name $nombreDominio -Force
-        Write-Host "Dominio eliminado correctamente." -ForegroundColor Green
-    }
-    else {
-        Write-Host "Operacion cancelada."
-    }
-
-    Read-Host "ENTER para continuar"
-}
-
-function Listar-Dominios {
-
-    Clear-Host
-    Write-Host "=== DOMINIOS CONFIGURADOS ===" -ForegroundColor Cyan
-
-    $zonas = Get-DnsServerZone -ErrorAction SilentlyContinue |
-             Where-Object {
-                 $_.ZoneType -eq "Primary" -and
-                 $_.ZoneName -notmatch "in-addr.arpa" -and
-                 $_.ZoneName -ne "TrustAnchors"
-             }
-
-    if (-not $zonas) {
-        Write-Host "No hay dominios creados manualmente." -ForegroundColor Yellow
-    }
-    else {
-        foreach ($zona in $zonas) {
-
-            $record = Get-DnsServerResourceRecord -ZoneName $zona.ZoneName -RRType A -ErrorAction SilentlyContinue |
-                      Where-Object {$_.HostName -eq "@"}
-
-            $ip = if ($record) {
-                $record.RecordData.IPv4Address.IPAddressToString
-            } else {
-                "Sin IP"
-            }
-
-            Write-Host "Dominio: $($zona.ZoneName)  ->  IP: $ip"
-        }
-    }
-
-    Read-Host "ENTER para continuar"
-}
-
-
-
 function Monitorear-IPs {
     Clear-Host
     Write-Host "=== IPs ASIGNADAS ACTUALMENTE (LEASES) ===" -ForegroundColor Cyan
@@ -487,43 +277,163 @@ function Monitorear-IPs {
     Read-Host "Presione ENTER para volver al menu"
 }
 
-while ($true) {
-    Clear-Host
-    Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host "      SISTEMA DE ADMINISTRACION DHCP      " -ForegroundColor Green
-    Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host "1) Verificar instalacion del Rol"
-    Write-Host "2) Instalar o Reinstalar DHCP"
-    Write-Host "3) Consulta de servicio (Status)"
-    Write-Host "4) Crear / Configurar Ambito DHCP"
-    Write-Host "5) Gestionar (Modificar/Eliminar) Ambito Existente"
-    Write-Host "6) Monitorear IPs asignadas (Leases)"
-    Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host "      SISTEMA DE ADMINISTRACION DNS       " -ForegroundColor Red
-    Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host "7) Instalar / Reinstalar DNS"
-    Write-Host "8) Alta Dominio DNS"
-    Write-Host "9) Baja Dominio DNS"
-    Write-Host "10) Listar Dominios DNS"
-    Write-Host "0) Salir"
-    Write-Host "==========================================" -ForegroundColor Cyan
-    $op = Read-Host "Seleccione una opcion"
+# --- FUNCIONES DE LOGICA DNS ---
 
-    switch ($op) {
-        '1' { Mostrar-Verificacion }
-        '2' { Instalar-Servicio }
-        '3' { Consultar-Estado }
-        '4' { Configurar-Ambito }
-        '5' { Gestionar-Ambito }
-        '6' { Monitorear-IPs }
-        '7' { Instalar-DNS }
-        '8' { Alta-Dominio }
-        '9' { Baja-Dominio }
-        '10' { Listar-Dominios }
-        '0' { Clear-Host; Write-Host "Saliendo del sistema..."; exit }
-        default {
-            Write-Host "Opcion no valida, intente de nuevo." -ForegroundColor Red
-            Start-Sleep -Seconds 1
+function Instalar-DNS {
+    Clear-Host
+    Write-Host "=== INSTALACION DE ROL DNS ===" -ForegroundColor Cyan
+
+    $dnsFeature = Get-WindowsFeature -Name DNS
+    if ($dnsFeature.Installed) {
+        Write-Host "El rol DNS ya esta instalado." -ForegroundColor Yellow
+        $resp = Read-Host "Desea REINSTALAR el rol DNS? (s/n)"
+        if ($resp -match "^[sS]$") {
+            Uninstall-WindowsFeature -Name DNS -IncludeManagementTools | Out-Null
+            Install-WindowsFeature -Name DNS -IncludeManagementTools | Out-Null
+            Write-Host "DNS reinstalado correctamente." -ForegroundColor Green
+        }
+    } else {
+        Install-WindowsFeature -Name DNS -IncludeManagementTools | Out-Null
+        Write-Host "DNS instalado correctamente." -ForegroundColor Green
+    }
+
+    Read-Host "Presione ENTER para continuar"
+}
+
+function Obtener-Rango-DHCP {
+    $ambito = Get-DhcpServerv4Scope | Select-Object -First 1
+    if (-not $ambito) { return $null }
+
+    return @{
+        Start = $ambito.StartRange
+        End   = $ambito.EndRange
+        Scope = $ambito.ScopeId
+    }
+}
+
+function Obtener-IP-Libre-DNS {
+    $rango = Obtener-Rango-DHCP
+    if (-not $rango) { return $null }
+
+    $start = Convert-IPToUInt32 $rango.Start
+    $end   = Convert-IPToUInt32 $rango.End
+
+    $zonas = Get-DnsServerZone -ErrorAction SilentlyContinue | Where-Object {$_.ZoneType -eq "Primary"}
+    $ipsUsadas = @()
+
+    foreach ($zona in $zonas) {
+        $record = Get-DnsServerResourceRecord -ZoneName $zona.ZoneName -RRType A -ErrorAction SilentlyContinue | Where-Object {$_.HostName -eq "@"}
+        if ($record) {
+            $ipsUsadas += Convert-IPToUInt32 $record.RecordData.IPv4Address.IPAddressToString
         }
     }
+
+    for ($i = $start; $i -le $end; $i++) {
+        if ($ipsUsadas -notcontains $i) {
+            return Convert-UInt32ToIP $i
+        }
+    }
+
+    return $null
+}
+
+function Alta-Dominio {
+    Clear-Host
+    Write-Host "=== CREACION DE DOMINIO DNS ===" -ForegroundColor Cyan
+
+    $Dominio = Read-Host "Introduce el nombre del dominio (ej. reprobados.com)"
+    
+    if ([string]::IsNullOrWhiteSpace($Dominio)) {
+        Write-Host "[!] El nombre de dominio no puede estar vacio." -ForegroundColor Red
+        Read-Host "Presione ENTER para continuar"
+        return
+    }
+
+    $ServerIP = Read-Host "Introduce la IP a la que apuntara (ej. 192.168.100.21)"
+    
+    if (-not (Test-ValidIP $ServerIP)) {
+        Write-Host "[!] La IP ingresada no es valida o tiene un formato incorrecto." -ForegroundColor Red
+        Read-Host "Presione ENTER para continuar"
+        return
+    }
+
+    try {
+        if (Get-DnsServerZone -Name $Dominio -ErrorAction SilentlyContinue) {
+            Remove-DnsServerZone -Name $Dominio -Force
+        }
+
+        Write-Host "[*] Creando archivo de zona y registros..." -ForegroundColor Yellow
+
+        Add-DnsServerPrimaryZone -Name $Dominio -ZoneFile "$Dominio.dns"
+        Add-DnsServerResourceRecordA -ZoneName $Dominio -Name "@" -IPv4Address $ServerIP
+        Add-DnsServerResourceRecordCName -ZoneName $Dominio -Name "www" -HostNameAlias "$Dominio."
+
+        Write-Host "[OK] Zona '$Dominio' creada con exito." -ForegroundColor Green
+        Write-Host "[OK] Registros A y CNAME apuntando a $ServerIP." -ForegroundColor Green
+        
+        Clear-DnsServerCache -Force
+    } catch {
+        Write-Host "[ERROR] Al configurar DNS: $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    Write-Host ""
+    Read-Host "Presione ENTER para continuar"
+}
+
+function Baja-Dominio {
+    Clear-Host
+    Write-Host "=== ELIMINAR DOMINIO DNS ===" -ForegroundColor Cyan
+
+    $zonas = Get-DnsServerZone -ErrorAction SilentlyContinue | Where-Object { $_.ZoneType -eq "Primary" -and $_.ZoneName -notmatch "in-addr.arpa" -and $_.ZoneName -ne "TrustAnchors" }
+
+    if (-not $zonas) {
+        Write-Host "No existen dominios creados manualmente." -ForegroundColor Yellow
+        Read-Host "ENTER para continuar"
+        return
+    }
+
+    foreach ($zona in $zonas) {
+        $record = Get-DnsServerResourceRecord -ZoneName $zona.ZoneName -RRType A -ErrorAction SilentlyContinue | Where-Object {$_.HostName -eq "@"}
+        $ip = if ($record) { $record.RecordData.IPv4Address.IPAddressToString } else { "Sin IP" }
+        Write-Host "$($zona.ZoneName)  ->  IP: $ip"
+    }
+
+    $nombreDominio = Read-Host "Escriba el NOMBRE del dominio a eliminar"
+    $zonaEncontrada = $zonas | Where-Object { $_.ZoneName -eq $nombreDominio }
+
+    if (-not $zonaEncontrada) {
+        Write-Host "El dominio no existe o no es valido." -ForegroundColor Red
+        Read-Host "ENTER para continuar"
+        return
+    }
+
+    $confirmar = Read-Host "Seguro que desea eliminar $nombreDominio ? (s/n)"
+
+    if ($confirmar -match "^[sS]$") {
+        Remove-DnsServerZone -Name $nombreDominio -Force
+        Write-Host "Dominio eliminado correctamente." -ForegroundColor Green
+    } else {
+        Write-Host "Operacion cancelada."
+    }
+
+    Read-Host "ENTER para continuar"
+}
+
+function Listar-Dominios {
+    Clear-Host
+    Write-Host "=== DOMINIOS CONFIGURADOS ===" -ForegroundColor Cyan
+
+    $zonas = Get-DnsServerZone -ErrorAction SilentlyContinue | Where-Object { $_.ZoneType -eq "Primary" -and $_.ZoneName -notmatch "in-addr.arpa" -and $_.ZoneName -ne "TrustAnchors" }
+
+    if (-not $zonas) {
+        Write-Host "No hay dominios creados manualmente." -ForegroundColor Yellow
+    } else {
+        foreach ($zona in $zonas) {
+            $record = Get-DnsServerResourceRecord -ZoneName $zona.ZoneName -RRType A -ErrorAction SilentlyContinue | Where-Object {$_.HostName -eq "@"}
+            $ip = if ($record) { $record.RecordData.IPv4Address.IPAddressToString } else { "Sin IP" }
+            Write-Host "Dominio: $($zona.ZoneName)  ->  IP: $ip"
+        }
+    }
+
+    Read-Host "ENTER para continuar"
 }

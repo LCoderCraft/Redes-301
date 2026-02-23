@@ -1,4 +1,5 @@
 #!/bin/bash
+# funciones_servicios.sh
 
 # --- CONFIGURACIÓN DE COLORES ---
 GREEN='\033[0;32m'
@@ -7,19 +8,20 @@ CYAN='\033[0;36m'
 YELLOW='\033[1;33m'
 NC='\033[0m' 
 
-# --- VALIDACIÓN DE PRIVILEGIOS ---
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}[!] Error: Este script modifica archivos del sistema y requiere permisos de administrador.${NC}"
-    echo -e "Por favor, ejecútalo usando: ${YELLOW}sudo $0${NC}"
-    exit 1
-fi
-
 LEASES="/var/lib/dhcpd/dhcpd.leases"
 ZONES_FILE="/etc/named.conf"
 NAMED_DIR="/var/named"
 
-# --- FUNCIONES PARA IPs ---
+# --- VALIDACIÓN DE PRIVILEGIOS ---
+function verificar_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${RED}[!] Error: Este script modifica archivos del sistema y requiere permisos de administrador.${NC}"
+        echo -e "Por favor, ejecútalo usando: ${YELLOW}sudo ./menu_servicios.sh${NC}"
+        exit 1
+    fi
+}
 
+# --- FUNCIONES PARA IPs ---
 ip_to_int() {
     local a b c d
     IFS=. read -r a b c d <<< "$1"
@@ -37,7 +39,6 @@ int_to_ip() {
 }
 
 # --- FUNCIONES DE VALIDACIÓN ---
-
 validar_ip() {
     local ip=$1
     if [[ "$ip" == "localhost" || "$ip" == "127.0.0.0" || "$ip" == "0.0.0.0" ]]; then
@@ -78,7 +79,7 @@ mascara_a_cidr() {
     echo $c
 }
 
-# --- FUNCIONES DEL MENÚ ---
+# --- FUNCIONES DE NEGOCIO (DHCP & DNS) ---
 
 f_verificar_instalacion() {
     clear
@@ -271,20 +272,16 @@ EOF
 }
 
 # --- FUNCIONES DE GESTIÓN DNS ---
-
-# --- FUNCIÓN AUXILIAR PARA LEER DOMINIOS ---
 mostrar_lista_dominios() {
     echo -e "DOMINIO              IP ASIGNADA"
     echo "----------------------------------------"
     
-    # Extraer nombres de dominios ignorando los de sistema (localhost, etc)
     local dominios=$(grep '^zone "' /etc/named.conf 2>/dev/null | awk -F'"' '{print $2}')
     local hay_dominios=0
     
     for d in $dominios; do
         local zone_file="/var/named/$d.zone"
         if [ -f "$zone_file" ]; then
-            # Extraer la IP del registro A principal
             local ip=$(grep -E "^@\s+IN\s+A" "$zone_file" | awk '{print $4}')
             printf "%-20s %s\n" "$d" "${ip}"
             hay_dominios=1
@@ -297,7 +294,6 @@ mostrar_lista_dominios() {
     echo "----------------------------------------"
 }
 
-# --- FUNCIÓN PARA EL MENÚ (VER DOMINIOS) ---
 f_ver_dominios() {
     clear
     echo -e "${CYAN}=== DOMINIOS DNS CONFIGURADOS ===${NC}"
@@ -370,7 +366,6 @@ f_borrar_dominio() {
         echo "[*] Archivo de zona $ZONE_FILE eliminado."
     fi
 
-    # EL ARREGLO ESTÁ AQUÍ: Se agregó ^}; para borrar el bloque exacto
     sed -i "/zone \"$DOMINIO\" IN {/,/^};/d" "$ZONES_FILE"
     systemctl restart named
     
@@ -392,36 +387,3 @@ f_monitorear_ips() {
     echo "----------------------------------------"
     read -p "Presione ENTER para continuar..."
 }
-
-# --- BUCLE PRINCIPAL DEL MENÚ ---
-# --- BUCLE PRINCIPAL DEL MENÚ ---
-while true; do
-    clear
-    echo -e "${CYAN}==========================================${NC}"
-    echo -e " ${GREEN}GESTOR AUTOMATIZADO DNS Y DHCP - ALMALINUX${NC}"
-    echo -e "${CYAN}==========================================${NC}"
-    echo "1) Verificar instalación de paquetes"
-    echo "2) Instalar Servicios (DNS y DHCP)"
-    echo "3) Consulta de servicio (Status Active)"
-    echo "4) Crear / Configurar Ámbito DHCP"
-    echo "5) Monitorear IPs asignadas (DHCP)"
-    echo "6) Crear nuevo Dominio DNS"
-    echo "7) Ver Dominios DNS configurados"  # <--- NUEVA OPCIÓN
-    echo "8) Borrar Dominio DNS"             # <--- RECORRIDO
-    echo "9) Salir"
-    echo -e "${CYAN}==========================================${NC}"
-    read -p "Seleccione una opción: " op
-
-    case $op in
-        1) f_verificar_instalacion ;;
-        2) f_instalar_servicios ;;
-        3) f_consulta_servicio ;;
-        4) f_configurar_dhcp ;;
-        5) f_monitorear_ips ;;
-        6) f_crear_dominio ;;
-        7) f_ver_dominios ;;
-        8) f_borrar_dominio ;;
-        9) clear; echo "Saliendo del sistema..."; exit 0 ;;
-        *) echo -e "${RED}Opción inválida.${NC}"; sleep 1 ;;
-    esac
-done
