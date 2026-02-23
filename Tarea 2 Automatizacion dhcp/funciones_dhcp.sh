@@ -1,4 +1,5 @@
 #!/bin/bash
+# funciones_dhcp.sh
 
 # --- CONFIGURACIÓN DE COLORES ---
 GREEN='\033[0;32m'
@@ -7,17 +8,18 @@ CYAN='\033[0;36m'
 YELLOW='\033[1;33m'
 NC='\033[0m' 
 
-# --- VALIDACIÓN DE PRIVILEGIOS ---
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}[!] Error: Este script modifica archivos del sistema y requiere permisos de administrador.${NC}"
-    echo -e "Por favor, ejecútalo usando: ${YELLOW}sudo $0${NC}"
-    exit 1
-fi
-
 LEASES="/var/lib/dhcpd/dhcpd.leases"
 
-# --- FUNCIONES PARA IPs ---
+# --- VALIDACIÓN DE PRIVILEGIOS ---
+function verificar_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${RED}[!] Error: Este script modifica archivos del sistema y requiere permisos de administrador.${NC}"
+        echo -e "Por favor, ejecútalo usando: ${YELLOW}sudo ./menu_dhcp.sh${NC}"
+        exit 1
+    fi
+}
 
+# --- FUNCIONES PARA IPs ---
 ip_to_int() {
     local a b c d
     IFS=. read -r a b c d <<< "$1"
@@ -35,7 +37,6 @@ int_to_ip() {
 }
 
 # --- FUNCIONES DE VALIDACIÓN ---
-
 validar_ip() {
     local ip=$1
     if [[ "$ip" == "localhost" || "$ip" == "127.0.0.0" || "$ip" == "0.0.0.0" ]]; then
@@ -77,7 +78,6 @@ mascara_a_cidr() {
 }
 
 # --- FUNCIONES DEL MENÚ ---
-
 f_verificar_instalacion() {
     clear
     echo -e "${CYAN}=== VERIFICACIÓN DE INSTALACIÓN ===${NC}"
@@ -127,18 +127,15 @@ f_configurar_dhcp() {
     clear
     echo -e "${CYAN}=== CREAR / CONFIGURAR ÁMBITO DHCP ===${NC}"
     
-    # 0. Nombre del Ámbito
     read -p "Nombre del Ámbito (Scope Name): " SCOPE
     if [[ -z "$SCOPE" ]]; then SCOPE="Ambito_Local"; fi
 
-    # 1. Rango Inicial
     while true; do
         read -p "Rango Inicial (Ejem: 192.168.100.1): " IP_INI
         validar_ip "$IP_INI" && break
         echo -e "${RED}IP inválida o restringida (0.0.0.0, 127.0.0.0, localhost).${NC}"
     done
 
-    # 2. Rango Final
     while true; do
         read -p "Rango Final (Ejem: 192.168.100.50): " IP_FIN
         if validar_ip "$IP_FIN"; then
@@ -154,14 +151,12 @@ f_configurar_dhcp() {
         fi
     done
 
-    # 3. Máscara de subred
     while true; do
         read -p "Máscara de subred (Ejem: 255.255.255.0): " MASCARA
         validar_mascara "$MASCARA" && break
         echo -e "${RED}Máscara de subred inválida.${NC}"
     done
 
-    # 4. Tiempos (sin decimales, mínimo 60 seg)
     while true; do
         read -p "Tiempo de concesión (segundos, min 60): " LEASE
         if [[ "$LEASE" =~ ^[0-9]+$ ]] && [ "$LEASE" -ge 60 ]; then
@@ -171,7 +166,6 @@ f_configurar_dhcp() {
         fi
     done
 
-    # 5. Parámetros opcionales
     while true; do
         read -p "Puerta de Enlace (Enter para dejar vacío): " GW
         if [[ -z "$GW" ]]; then break; fi
@@ -186,7 +180,6 @@ f_configurar_dhcp() {
         echo -e "${RED}Formato de IP inválido.${NC}"
     done
 
-    # --- LÓGICA DE CÁLCULO DE RED ---
     INT_MASK=$(ip_to_int "$MASCARA")
     INT_NET_ID=$(( INT_INI & INT_MASK ))
     NET_ID=$(int_to_ip $INT_NET_ID)
@@ -197,7 +190,6 @@ f_configurar_dhcp() {
     SERVER_IP=$IP_INI
     DHCP_START_IP=$(int_to_ip $(( INT_INI + 1 )))
 
-    # Interfaz Fija
     INTERFAZ="enp0s8"
 
     echo -e "\n${YELLOW}[*] Resumen Lógico (${SCOPE}):${NC}"
@@ -211,7 +203,6 @@ f_configurar_dhcp() {
     nmcli con mod "$INTERFAZ" ipv4.addresses "$SERVER_IP/$CIDR" ipv4.method manual &> /dev/null
     nmcli con up "$INTERFAZ" &> /dev/null
 
-    # --- CREACIÓN DEL ARCHIVO DHCPD.CONF (SOBREESCRIBE ANTERIOR) ---
     echo "[*] Generando /etc/dhcp/dhcpd.conf..."
     
     OPT_GW=""
@@ -236,7 +227,6 @@ subnet $NET_ID netmask $MASCARA {
 }
 EOF
 
-    # --- REINICIO Y FIREWALL ---
     echo "[*] Validando configuración DHCP..."
     if dhcpd -t -cf /etc/dhcp/dhcpd.conf &> /dev/null; then
         echo -e "${GREEN}[+] Sintaxis válida.${NC}"
@@ -246,7 +236,6 @@ EOF
         firewall-cmd --reload &> /dev/null
         
         systemctl enable dhcpd &> /dev/null
-        # Reiniciar el servicio cierra el proceso anterior y carga la nueva config
         systemctl restart dhcpd
         
         if systemctl is-active dhcpd &> /dev/null; then
@@ -288,36 +277,3 @@ f_monitorear_ips() {
     echo "----------------------------------------"
     read -p "Presione ENTER para continuar..."
 }
-
-# --- BUCLE PRINCIPAL DEL MENÚ ---
-while true; do
-    clear
-    echo -e "${CYAN}==========================================${NC}"
-    echo -e " ${GREEN}SISTEMA DE ADMINISTRACIÓN DHCP - ALMALINUX${NC}"
-    echo -e "${CYAN}==========================================${NC}"
-    echo "1) Verificar instalación"
-    echo "2) Instalar DHCP (o Reinstalar)"
-    echo "3) Consulta de servicio (Status)"
-    echo "4) Crear / Configurar Ámbito DHCP"
-    echo "5) Monitorear IPs asignadas"
-    echo "6) Salir"
-    echo -e "${CYAN}==========================================${NC}"
-    read -p "Seleccione una opción: " op
-
-    case $op in
-        1) f_verificar_instalacion ;;
-        2) f_instalar_dhcp ;;
-        3) f_consulta_servicio ;;
-        4) f_configurar_dhcp ;;
-        5) f_monitorear_ips ;;
-        6) 
-            clear
-            echo "Saliendo del sistema..."
-            exit 0 
-            ;;
-        *)
-            echo -e "${RED}Opción inválida.${NC}"
-            sleep 1
-            ;;
-    esac
-done

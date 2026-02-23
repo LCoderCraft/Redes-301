@@ -1,8 +1,4 @@
-#Requires -RunAsAdministrator
-
-# ==========================================================
-#   SISTEMA MAESTRO DE ADMINISTRACION DHCP - WINDOWS
-# ==========================================================
+# FuncionesDHCP.ps1
 
 function Convert-IPToUInt32 ([string]$IP) {
     $bytes = ([System.Net.IPAddress]$IP).GetAddressBytes()
@@ -25,7 +21,6 @@ function Get-NetworkID {
     return ([System.Net.IPAddress]$netB).ToString()
 }
 
-# --- FUNCIONES DE VALIDACION ---
 function Test-ValidIP ($IP) {
     if ([string]::IsNullOrWhiteSpace($IP) -or $IP -eq "localhost" -or $IP -eq "127.0.0.0" -or $IP -eq "0.0.0.0") { 
         return $false 
@@ -52,8 +47,7 @@ function Get-CidrLength ([string]$Mask) {
     return $global:MaskCidrTable[$Mask]
 }
 
-# --- FUNCIONES DEL MENU ---
-
+# --- FUNCIONES DE NEGOCIO ---
 function Mostrar-Verificacion {
     Clear-Host
     Write-Host "=== VERIFICACION DE INSTALACION ===" -ForegroundColor Cyan
@@ -275,37 +269,4 @@ function Monitorear-IPs {
     }
     Write-Host ""
     Read-Host "Presione ENTER para volver al menu"
-}
-
-# ==========================================================
-#   BUCLE PRINCIPAL DEL MENU
-# ==========================================================
-while ($true) {
-    Clear-Host
-    Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host " SISTEMA DE ADMINISTRACION DHCP - WINDOWS " -ForegroundColor Green
-    Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host "1) Verificar instalacion del Rol"
-    Write-Host "2) Instalar o Reinstalar DHCP"
-    Write-Host "3) Consulta de servicio (Status)"
-    Write-Host "4) Crear / Configurar Ambito DHCP"
-    Write-Host "5) Gestionar (Modificar/Eliminar) Ambito Existente"
-    Write-Host "6) Monitorear IPs asignadas (Leases)"
-    Write-Host "7) Salir"
-    Write-Host "==========================================" -ForegroundColor Cyan
-    $op = Read-Host "Seleccione una opcion"
-
-    switch ($op) {
-        '1' { Mostrar-Verificacion }
-        '2' { Instalar-Servicio }
-        '3' { Consultar-Estado }
-        '4' { Configurar-Ambito }
-        '5' { Gestionar-Ambito }
-        '6' { Monitorear-IPs }
-        '7' { Clear-Host; Write-Host "Saliendo del sistema..."; exit }
-        default {
-            Write-Host "Opcion no valida, intente de nuevo." -ForegroundColor Red
-            Start-Sleep -Seconds 1
-        }
-    }
 }
