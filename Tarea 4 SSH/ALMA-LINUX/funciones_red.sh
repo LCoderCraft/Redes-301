@@ -42,15 +42,20 @@ function instalar_ssh_idempotente() {
 }
 
 function configurar_ip_estatica() {
-    echo -e "${CYAN}--- Configuración de IP Estática ---${NC}"
-    local conn_name=$(nmcli -t -f NAME,DEVICE connection show --active | head -n 1 | cut -d':' -f1)
+    echo -e "${CYAN}--- Configuración de IP Estática (Administración/SSH) ---${NC}"
     
-    if [ -z "$conn_name" ]; then
-        echo -e "${RED}[!] No se encontró una conexión de red activa.${NC}"
+    echo -e "${BLUE}Interfaces de red activas:${NC}"
+    nmcli -t -f NAME,DEVICE connection show --active | awk -F: '{print "- " $1 " (Dispositivo: " $2 ")"}'
+    
+    echo ""
+    read -p $'\e[1;33mEscribe el nombre de la interfaz para SSH (ej. enp0s3): \e[0m' conn_name
+    
+    if ! nmcli -t -f NAME connection show | grep -wq "^$conn_name$"; then
+        echo -e "${RED}[!] La conexión '$conn_name' no existe o no es válida.${NC}"
         return 1
     fi
 
-    echo -e "${BLUE}Interfaz activa: ${BOLD}$conn_name${NC}"
+    echo -e "${BLUE}Configurando la interfaz: ${BOLD}$conn_name${NC}"
     read -p $'\e[1;33mIngresa la IP con máscara (ej. 192.168.1.10/24): \e[0m' ip_fija
     
     if [ -z "$ip_fija" ]; then
@@ -63,7 +68,7 @@ function configurar_ip_estatica() {
     read -p $'\e[1;33mIngresa la Puerta de Enlace [Enter para dejar vacío]: \e[0m' gateway
     read -p $'\e[1;33mIngresa el servidor DNS [Enter para dejar vacío]: \e[0m' dns
 
-    echo -e "${BLUE}[*] Aplicando configuración de red...${NC}"
+    echo -e "${BLUE}[*] Aplicando configuración de red a $conn_name...${NC}"
     nmcli con mod "$conn_name" ipv4.addresses "$ip_fija"
     nmcli con mod "$conn_name" ipv4.method manual
 
@@ -80,7 +85,7 @@ function configurar_ip_estatica() {
     fi
 
     nmcli con up "$conn_name" &> /dev/null
-    echo -e "${GREEN}${BOLD}[+] IP configurada correctamente.${NC}"
+    echo -e "${GREEN}${BOLD}[+] IP configurada correctamente en $conn_name.${NC}"
 }
 
 function habilitar_acceso_remoto() {

@@ -22,15 +22,32 @@ function Install-SSHIdempotent {
 }
 
 function Set-StaticIP {
-    Write-Host "--- Configuracion de IP Estatica ---" -ForegroundColor Cyan
-    $adapter = Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1
+    Write-Host "--- Configuracion de IP Estatica para Administracion (SSH) ---" -ForegroundColor Cyan
     
-    if (-not $adapter) {
+    $adapters = Get-NetAdapter | Where-Object Status -eq 'Up'
+    
+    if (-not $adapters) {
         Write-Host "[!] No se encontro ningun adaptador activo." -ForegroundColor Red
         return $null
     }
 
-    Write-Host "Interfaz activa: $($adapter.Name)" -ForegroundColor Yellow
+    Write-Host "Adaptadores de red disponibles:" -ForegroundColor Yellow
+    $i = 1
+    foreach ($a in $adapters) {
+        Write-Host "$i) $($a.Name) - $($a.InterfaceDescription)"
+        $i++
+    }
+    
+    $seleccion = Read-Host "Selecciona el numero del adaptador para SSH (Normalmente 1 para 'Ethernet')"
+    $adapter = $adapters[[int]$seleccion - 1]
+
+    if (-not $adapter) {
+        Write-Host "[!] Seleccion invalida." -ForegroundColor Red
+        return $null
+    }
+
+    Write-Host "Interfaz de administracion seleccionada: $($adapter.Name)" -ForegroundColor Green
+    
     $ip = Read-Host "Ingresa IP estatica (ej. 192.168.1.20)"
     $prefix = Read-Host "Ingresa prefijo de subred (ej. 24)"
     
@@ -64,7 +81,7 @@ function Set-StaticIP {
         Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ResetServerAddresses | Out-Null
     }
 
-    Write-Host "[+] IP configurada correctamente." -ForegroundColor Green
+    Write-Host "[+] IP configurada correctamente en $($adapter.Name)." -ForegroundColor Green
     return $ip
 }
 
