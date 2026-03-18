@@ -308,6 +308,13 @@ f_crear_dominio() {
     read -p "Introduce el nombre del dominio (ej. reprobados.com): " DOMINIO
     read -p "Introduce la IP a la que apuntará (ej. 10.0.0.2): " IP_TARGET
 
+    # Validación básica de entrada
+    if [[ -z "$DOMINIO" || -z "$IP_TARGET" ]]; then
+        echo -e "${RED}[!] El dominio y la IP son obligatorios.${NC}"
+        read -p "Presione ENTER para continuar..."
+        return
+    fi
+
     ZONE_FILE="$NAMED_DIR/$DOMINIO.zone"
 
     if grep -q "zone \"$DOMINIO\"" "$ZONES_FILE"; then
@@ -317,9 +324,10 @@ f_crear_dominio() {
     fi
 
     echo "[*] Creando archivo de zona $ZONE_FILE..."
+    # Usamos cat sin espacios al inicio de las líneas para evitar basura en el archivo
     cat <<EOF > "$ZONE_FILE"
 \$TTL 86400
-@   IN  SOA     ns1.$DOMINIO. root.$DOMINIO. ( 2026021801 3600 1800 604800 86400 )
+@   IN  SOA    ns1.$DOMINIO. root.$DOMINIO. ( 2026021801 3600 1800 604800 86400 )
 @   IN  NS      ns1.$DOMINIO.
 ns1 IN  A       $IP_TARGET
 @   IN  A       $IP_TARGET
@@ -330,21 +338,24 @@ EOF
     chmod 640 "$ZONE_FILE"
 
     echo "[*] Agregando zona a $ZONES_FILE..."
+    # IMPORTANTE: No pongas espacios antes de 'zone', 'type', etc. dentro del cat
     cat <<EOF >> "$ZONES_FILE"
 
 zone "$DOMINIO" IN {
-    type master;
-    file "$ZONE_FILE";
-    allow-update { none; };
+type master;
+file "$ZONE_FILE";
+allow-update { none; };
 };
 EOF
 
-    named-checkconf
+    named-checkconf "$ZONES_FILE"
     if [ $? -eq 0 ]; then
         systemctl restart named
         echo -e "${GREEN}[+] Dominio $DOMINIO creado con éxito apuntando a $IP_TARGET.${NC}"
     else
-        echo -e "${RED}[!] Error de sintaxis en BIND.${NC}"
+        echo -e "${RED}[!] Error de sintaxis en BIND detectado por named-checkconf.${NC}"
+        # Opcional: revertir el cambio si falló la sintaxis
+        sed -i "/zone \"$DOMINIO\" IN {/,/^};/d" "$ZONES_FILE"
     fi
     echo ""
     read -p "Presione ENTER para continuar..."

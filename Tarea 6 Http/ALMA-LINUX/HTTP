@@ -1,0 +1,30 @@
+#!/bin/bash
+# ============================================================
+# main_http.sh  -  Practica 6 | AlmaLinux
+# Script principal - Solo llamadas a funciones
+# ============================================================
+
+source ./http_functions.sh
+
+verificar_root
+
+while true; do
+    clear
+    echo -e "${CYAN}===================================================${NC}"
+    echo -e "${GREEN}${BOLD}     APROVISIONAMIENTO DE SERVIDORES HTTP - LINUX  ${NC}"
+    echo -e "${CYAN}===================================================${NC}"
+    echo -e "  1. Instalar Apache (httpd)"
+    echo -e "  2. Instalar Nginx"
+    echo -e "  3. Instalar Apache Tomcat"
+    echo -e "  0. Salir"
+    echo -e "${CYAN}===================================================${NC}"
+    read -p $'\e[1;32mSelecciona un servidor [0-3]: \e[0m' opcion
+
+    case $opcion in
+        1) instalar_apache ;;
+        2) instalar_nginx  ;;
+        3) instalar_tomcat ;;
+        0) clear; echo -e "${MAGENTA}Saliendo...${NC}"; exit 0 ;;
+        *) echo -e "${RED}[!] Opcion invalida.${NC}"; sleep 1 ;;
+    esac
+done
